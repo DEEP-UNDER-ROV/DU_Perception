@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(camera_info_manager REQUIRED)
@@ -62,12 +63,24 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 )
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
-add_executable(visualizer src/visualizer.cpp)
-ament_target_dependencies(visualizer rclcpp sensor_msgs cv_bridge)
-target_include_directories(visualizer PRIVATE ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(visualizer ${cpp_typesupport_target} ${OpenCV_LIBS})
+add_executable(depth_estimation
+  src/depth_estimation.cpp
+  src/depth_estimation_main.cpp
+)
+ament_target_dependencies(depth_estimation rclcpp sensor_msgs std_msgs cv_bridge)
+target_include_directories(depth_estimation PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(depth_estimation ${OpenCV_LIBS})
 
-install(TARGETS camera_info_publisher stereo_triangulator tag_velocity_estimator visualizer
+add_executable(streamer
+  src/streamer.cpp
+  src/streamer_main.cpp
+)
+ament_target_dependencies(streamer rclcpp sensor_msgs std_msgs cv_bridge)
+target_include_directories(streamer PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(streamer ${cpp_typesupport_target} ${OpenCV_LIBS})
+
+install(TARGETS camera_info_publisher stereo_triangulator tag_velocity_estimator
+  depth_estimation streamer
   DESTINATION lib/${PROJECT_NAME}
 )
 

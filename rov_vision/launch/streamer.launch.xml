@@ -1,0 +1,8 @@
+<launch>
+  <arg name="param_dir" default="$(find-pkg-share rov_vision)/config"/>
+  <arg name="streamer_file" default="streamer.yaml" description="Relative to param_dir"/>
+
+  <node pkg="rov_vision" exec="streamer" name="streamer" output="screen">
+    <param from="$(var param_dir)/$(var streamer_file)"/>
+  </node>
+</launch>
