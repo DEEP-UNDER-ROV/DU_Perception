@@ -1,0 +1,12 @@
+<launch>
+<arg name="param_dir" default="$(find-pkg-share jir_image_remapper)/config"/>
+<arg name="config_file" default="jir_image_remapper.yaml"/>
+<arg name="left_map_file" default="correctionMap_left.yaml"/>
+<arg name="right_map_file" default="correctionMap_right.yaml"/>
+
+<node pkg="jir_image_remapper" exec="jir_image_remapper" name="stereo_remapper_node" output="screen">
+  <param from="$(var param_dir)/$(var config_file)"/>
+  <param name="left_map" value="$(var param_dir)/$(var left_map_file)"/>
+  <param name="right_map" value="$(var param_dir)/$(var right_map_file)"/>
+</node>
+</launch>

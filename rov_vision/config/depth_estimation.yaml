@@ -3,8 +3,8 @@ depth_estimation:
     enabled: true            # the streamer switches this via topics.enable
 
     topics:
-      infra1: /camera/camera/infra1/image_rect_raw
-      infra2: /camera/camera/infra2/image_rect_raw
+      infra1: /corrected/left/image_raw
+      infra2: /corrected/right/image_raw
       depth_viz: /depth_estimation/image_viz
       depth: /depth_estimation/depth
       enable: /depth_estimation/enable   # "" disables gating (always on)
