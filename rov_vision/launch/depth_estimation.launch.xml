@@ -1,8 +1,12 @@
 <launch>
   <arg name="param_dir" default="$(find-pkg-share rov_vision)/config"/>
-  <arg name="depth_estimation_file" default="depth_estimation.yaml" description="Relative to param_dir"/>
+  <arg name="camera_file" default="camera.yaml"/>
+  <arg name="depth_estimation_file" default="depth_estimation.yaml"/>
+  <arg name="use_sim" default="false"/>
 
   <node pkg="rov_vision" exec="depth_estimation" name="depth_estimation" output="screen">
+    <param from="$(var param_dir)/$(var camera_file)"/>
     <param from="$(var param_dir)/$(var depth_estimation_file)"/>
+    <param name="use_sim_time" value="$(var use_sim)"/>
   </node>
 </launch>

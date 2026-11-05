@@ -1,0 +1,30 @@
+orb_slam3:
+  ros__parameters:
+    slam:
+      viewer: true
+      rectify: false
+      equalize: false
+      camera_rgb: 0
+      th_depth: 30.0
+      insert_kfs_when_lost: 0
+      imu_fast_init: 1
+
+    orb:
+      n_features: 2500
+      scale_factor: 1.32
+      n_levels: 10
+      ini_th_fast: 15
+      min_th_fast: 7
+
+    viewer:
+      keyframe_size: 0.05
+      keyframe_line_width: 1.0
+      graph_line_width: 0.9
+      point_size: 2.0
+      camera_size: 0.08
+      camera_line_width: 3.0
+      viewpoint:
+        x: 0.0
+        y: -0.7
+        z: -3.5
+        f: 500.0

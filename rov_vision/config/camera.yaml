@@ -1,0 +1,34 @@
+/**:
+  ros__parameters:
+    camera:
+      type: PinHole
+      width: 848
+      height: 480
+      fps: 30
+
+      left:
+        fx: 430.793086
+        fy: 430.793086
+        cx: 414.830803
+        cy: 244.104872
+        k1: 0.0
+        k2: 0.0
+        p1: 0.0
+        p2: 0.0
+        mask_file: mask_left.png
+
+      right:
+        fx: 430.793086
+        fy: 430.793086
+        cx: 414.830803
+        cy: 244.104872
+        k1: 0.0
+        k2: 0.0
+        p1: 0.0
+        p2: 0.0
+        mask_file: mask_right.png
+
+      T_left_right: [1.0, 0.0, 0.0, 0.09638894907585159,
+                     0.0, 1.0, 0.0, 0.0,
+                     0.0, 0.0, 1.0, 0.0,
+                     0.0, 0.0, 0.0, 1.0]

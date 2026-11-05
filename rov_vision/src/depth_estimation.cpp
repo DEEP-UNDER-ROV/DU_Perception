@@ -36,8 +36,6 @@ DepthEstimation::DepthEstimation(const rclcpp::NodeOptions& options)
 
   cb_stereo_ =
       create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  cb_ctrl_ =
-      create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
   rclcpp::QoS qos{rclcpp::KeepLast(static_cast<size_t>(qos_depth_))};
   if (qos_reliable_) {
@@ -46,9 +44,8 @@ DepthEstimation::DepthEstimation(const rclcpp::NodeOptions& options)
     qos.best_effort();
   }
 
-  rclcpp::SubscriptionOptions o_stereo, o_ctrl;
+  rclcpp::SubscriptionOptions o_stereo;
   o_stereo.callback_group = cb_stereo_;
-  o_ctrl.callback_group = cb_ctrl_;
 
   sub_ir1_ = create_subscription<Image>(
       topic_ir1_, qos, [this](Image::ConstSharedPtr m) { on_infra(true, m); },
@@ -62,22 +59,15 @@ DepthEstimation::DepthEstimation(const rclcpp::NodeOptions& options)
     pub_depth_ = create_publisher<Image>(topic_depth_, 1);
   }
 
-  if (!topic_enable_.empty()) {
-    sub_enable_ = create_subscription<std_msgs::msg::Bool>(
-        topic_enable_, rclcpp::QoS(1).reliable().transient_local(),
-        [this](std_msgs::msg::Bool::ConstSharedPtr m) { set_enabled(m->data); },
-        o_ctrl);
-  }
-
   param_cb_ = add_on_set_parameters_callback(
       [this](const std::vector<rclcpp::Parameter>& ps) {
         return on_params(ps);
       });
 
   RCLCPP_INFO(get_logger(),
-              "depth_estimation up. enabled=%d, infra1=%s, infra2=%s, "
+              "depth_estimation up. enabled=%d, lazy=%d, infra1=%s, infra2=%s, "
               "viz=%s (%dx%d)",
-              enabled_.load(), topic_ir1_.c_str(), topic_ir2_.c_str(),
+              enabled_.load(), lazy_, topic_ir1_.c_str(), topic_ir2_.c_str(),
               topic_viz_.c_str(), viz_size_.width, viz_size_.height);
 }
 
@@ -88,35 +78,25 @@ void DepthEstimation::declare_all_parameters() {
       P<std::string>("topics.infra2", "/camera/camera/infra2/image_rect_raw");
   topic_viz_ = P<std::string>("topics.depth_viz", "/depth_estimation/image_viz");
   topic_depth_ = P<std::string>("topics.depth", "/depth_estimation/depth");
-  topic_enable_ = P<std::string>("topics.enable", "/depth_estimation/enable");
   qos_reliable_ = P<bool>("qos.reliable", false);
   qos_depth_ = std::max<int>(1, P<int>("qos.depth", 2));
 
   cam_w_ = P<int>("camera.width", 848);
   cam_h_ = P<int>("camera.height", 480);
-  cam_l_.fx = P<double>("camera.fx", 430.793086);
-  cam_l_.fy = P<double>("camera.fy", 430.793086);
-  cam_l_.cx = P<double>("camera.cx", 414.830803);
-  cam_l_.cy = P<double>("camera.cy", 244.104872);
-  cam_l_.k1 = P<double>("camera.k1", 0.0);
-  cam_l_.k2 = P<double>("camera.k2", 0.0);
-  cam_l_.p1 = P<double>("camera.p1", 0.0);
-  cam_l_.p2 = P<double>("camera.p2", 0.0);
-  baseline_ = P<double>("camera.baseline", 0.09638894907585159);
-  const double bf = P<double>("camera.bf", 41.523693);
-  cam_r_.fx = P<double>("camera2.fx", cam_l_.fx);
-  cam_r_.fy = P<double>("camera2.fy", cam_l_.fy);
-  cam_r_.cx = P<double>("camera2.cx", cam_l_.cx);
-  cam_r_.cy = P<double>("camera2.cy", cam_l_.cy);
-  cam_r_.k1 = P<double>("camera2.k1", 0.0);
-  cam_r_.k2 = P<double>("camera2.k2", 0.0);
-  cam_r_.p1 = P<double>("camera2.p1", 0.0);
-  cam_r_.p2 = P<double>("camera2.p2", 0.0);
-  if (baseline_ <= 0.0 && bf > 0.0) {
-    baseline_ = bf / cam_l_.fx;
+  cam_l_ = declare_intrinsics("camera.left");
+  cam_r_ = declare_intrinsics("camera.right");
+
+  const auto t_lr = P<std::vector<double>>("camera.T_left_right", {});
+  if (t_lr.size() != 16) {
+    throw std::runtime_error("camera.T_left_right must be a row-major 4x4 (16 values)");
   }
+  baseline_ = std::hypot(t_lr[3], t_lr[7], t_lr[11]);
   if (baseline_ <= 0.0) {
-    throw std::runtime_error("camera.baseline (or camera.bf) must be > 0");
+    throw std::runtime_error("camera.T_left_right has zero baseline");
+  }
+  if (std::abs(t_lr[7]) > 0.01 * baseline_ || std::abs(t_lr[11]) > 0.01 * baseline_) {
+    RCLCPP_WARN(get_logger(),
+                "camera.T_left_right is not a pure x-translation, images may not be rectified");
   }
   if (cam_w_ <= 0 || cam_h_ <= 0) {
     throw std::runtime_error("camera.width/height must be > 0");
@@ -156,6 +136,23 @@ void DepthEstimation::declare_all_parameters() {
                        std::max(64, P<int>("viz.height", 480)));
 
   enabled_ = P<bool>("enabled", true);
+  lazy_ = P<bool>("lazy", true);
+}
+
+Intrinsics DepthEstimation::declare_intrinsics(const std::string& prefix) {
+  Intrinsics i;
+  i.fx = P<double>(prefix + ".fx", 0.0);
+  i.fy = P<double>(prefix + ".fy", 0.0);
+  i.cx = P<double>(prefix + ".cx", 0.0);
+  i.cy = P<double>(prefix + ".cy", 0.0);
+  i.k1 = P<double>(prefix + ".k1", 0.0);
+  i.k2 = P<double>(prefix + ".k2", 0.0);
+  i.p1 = P<double>(prefix + ".p1", 0.0);
+  i.p2 = P<double>(prefix + ".p2", 0.0);
+  if (i.fx <= 0.0 || i.fy <= 0.0 || i.cx <= 0.0 || i.cy <= 0.0) {
+    throw std::runtime_error(prefix + " intrinsics are not set");
+  }
+  return i;
 }
 
 rcl_interfaces::msg::SetParametersResult DepthEstimation::on_params(
@@ -272,8 +269,13 @@ void DepthEstimation::ensure_rectify_maps(const cv::Size& sz) {
   }
 }
 
+bool DepthEstimation::has_consumers() const {
+  return pub_viz_->get_subscription_count() > 0 ||
+         (pub_depth_ && pub_depth_->get_subscription_count() > 0);
+}
+
 void DepthEstimation::on_infra(bool left, const Image::ConstSharedPtr& msg) {
-  if (!enabled_) {
+  if (!enabled_ || (lazy_ && !has_consumers())) {
     return;
   }  
 

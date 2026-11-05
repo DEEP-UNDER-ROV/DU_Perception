@@ -1,5 +1,4 @@
-#ifndef ROV_VISION__DEPTH_ESTIMATION_HPP_
-#define ROV_VISION__DEPTH_ESTIMATION_HPP_
+#pragma once
 
 #include <atomic>
 #include <mutex>
@@ -12,7 +11,6 @@
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
-#include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/header.hpp"
 
 namespace rov_vision {
@@ -48,25 +46,23 @@ class DepthEstimation : public rclcpp::Node {
     return declare_parameter<T>(name, def);
   }
 
-  // parameters / control
   void declare_all_parameters();
+  Intrinsics declare_intrinsics(const std::string& prefix);
   rcl_interfaces::msg::SetParametersResult on_params(
       const std::vector<rclcpp::Parameter>& ps);
   void set_enabled(bool on);
+  bool has_consumers() const;
 
-  // stereo
   void setup_stereo();
   void ensure_rectify_maps(const cv::Size& sz);
   void on_infra(bool left, const Image::ConstSharedPtr& msg);
   void process_stereo(const IrFrame& l, const IrFrame& r);
 
-  // visualisation
   cv::Mat colorize(const cv::Mat& depth) const;
   void build_legend();
   void apply_legend(cv::Mat& img) const;
 
-  // params
-  std::string topic_ir1_, topic_ir2_, topic_viz_, topic_depth_, topic_enable_;
+  std::string topic_ir1_, topic_ir2_, topic_viz_, topic_depth_;
   bool qos_reliable_{false};
   int qos_depth_{2};
   int cam_w_{848}, cam_h_{480};
@@ -85,29 +81,23 @@ class DepthEstimation : public rclcpp::Node {
   int legend_ticks_{6}, legend_w_{84};
   cv::Size viz_size_;
   bool publish_depth_{false};
+  bool lazy_{true};
 
-  // runtime-changeable
   std::atomic<bool> enabled_{true};
 
-  // stereo state
   cv::Ptr<cv::StereoSGBM> matcher_;
   cv::Size maps_size_;
   cv::Mat map1_l_, map2_l_, map1_r_, map2_r_;
   std::mutex ir_mtx_;
   IrFrame ir_l_, ir_r_;
 
-  // legend
   cv::Rect legend_rect_;
   cv::Mat legend_layer_, legend_mask_;
 
-  // ROS
-  rclcpp::CallbackGroup::SharedPtr cb_stereo_, cb_ctrl_;
+  rclcpp::CallbackGroup::SharedPtr cb_stereo_;
   rclcpp::Subscription<Image>::SharedPtr sub_ir1_, sub_ir2_;
-  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr sub_enable_;
   rclcpp::Publisher<Image>::SharedPtr pub_viz_, pub_depth_;
   OnSetParametersCallbackHandle::SharedPtr param_cb_;
 };
 
 }  // namespace rov_vision
-
-#endif  // ROV_VISION__DEPTH_ESTIMATION_HPP_
