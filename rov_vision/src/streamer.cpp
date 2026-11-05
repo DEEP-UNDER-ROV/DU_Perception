@@ -127,10 +127,10 @@ Streamer::Streamer(const rclcpp::NodeOptions& options)
       [this]() { on_timer(); }, cb_out_);
 
   RCLCPP_INFO(get_logger(),
-              "streamer up. mode=%s, color=%s, depth=%s, out=%dx%d@%.1f",
+              "streamer up. mode=%s, color=%s, depth=%s, out=%dx%d@%.1f, gop=%d",
               mode_to_string(mode_.load()), topic_color_.c_str(),
               topic_depth_viz_.c_str(), out_size_.width, out_size_.height,
-              fps_);
+              fps_, gcs_keyint_);
 }
 
 void Streamer::declare_all_parameters() {
@@ -140,7 +140,7 @@ void Streamer::declare_all_parameters() {
       P<std::string>("topics.depth_viz", "/depth_estimation/image_viz");
   topic_enable_ = P<std::string>("topics.enable", "/depth_estimation/enable");
   topic_out_ = P<std::string>("topics.output", "/streamer/image");
-  qos_reliable_ = P<bool>("qos.reliable", false);
+  qos_reliable_ = P<bool>("qos.reliable", true);
   qos_depth_ = std::max<int>(1, P<int>("qos.depth", 2));
 
   const std::string mode_s = P<std::string>("stream.mode", "color");
@@ -153,7 +153,7 @@ void Streamer::declare_all_parameters() {
   alt_color_sec_ = P<double>("stream.alternate_color_sec", 5.0);
   alt_depth_sec_ = P<double>("stream.alternate_depth_sec", 5.0);
   event_driven_ = P<bool>("stream.event_driven", true);
-  fps_ = std::max(1.0, P<double>("stream.fps", 15.0));
+  fps_ = std::max(1.0, P<double>("stream.fps", 30.0));
   out_size_ = cv::Size(std::max(64, P<int>("stream.output_width", 848)),
                        std::max(64, P<int>("stream.output_height", 480)));
   stale_sec_ = P<double>("stream.stale_timeout_sec", 1.0);
@@ -165,12 +165,12 @@ void Streamer::declare_all_parameters() {
   gcs_port_ = P<int>("gcs.port", 5600);
   gcs_encoder_ = P<std::string>("gcs.encoder", "x264");
   gcs_bitrate_ = P<int>("gcs.bitrate_kbps", 2000);
+  gcs_keyint_ = std::max(1, P<int>("gcs.keyframe_interval", 30));
   gcs_pipeline_ = P<std::string>("gcs.pipeline", "");
 
   alt_start_ = now_steady_sec();
 }
 
-// Only the stream mode and the alternate durations can change while running.
 rcl_interfaces::msg::SetParametersResult Streamer::on_params(
     const std::vector<rclcpp::Parameter>& ps) {
   rcl_interfaces::msg::SetParametersResult res;
@@ -201,8 +201,7 @@ rcl_interfaces::msg::SetParametersResult Streamer::on_params(
     }
   }
 
-  // Apply durations first so a mode change to "alternate" starts with the new
-  // timings.
+  // durations before mode, so switching to alternate uses the new timings
   for (const auto& p : ps) {
     if (p.get_name() == "stream.alternate_color_sec") {
       alt_color_sec_ = p.as_double();
@@ -269,7 +268,6 @@ void Streamer::publish_depth_request(bool needed) {
   pub_enable_->publish(msg);
 }
 
-// ------------------------------------------------------------------- input
 cv::Mat Streamer::to_output_size(const cv::Mat& src, int interpolation) const {
   if (src.size() == out_size_) {
     return src.clone();
@@ -317,7 +315,6 @@ void Streamer::on_depth(const Image::ConstSharedPtr& msg) {
   }
 }
 
-// ------------------------------------------------------------------ output
 cv::Mat Streamer::fresh(std::mutex& m, const TimedFrame& f) const {
   std::lock_guard<std::mutex> lk(m);
   if (f.img.empty()) {
@@ -362,9 +359,7 @@ cv::Mat Streamer::compose() {
   return frame;
 }
 
-// Fixed-rate mode: compose + send every tick. Event-driven mode: the timer (1
-// Hz) only retries opening the GStreamer pipeline; frames are sent from the
-// image callbacks.
+// event-driven: frames go out from the image callbacks, timer only reopens the pipeline
 void Streamer::on_timer() {
   if (event_driven_) {
     std::lock_guard<std::mutex> lk(writer_mtx_);
@@ -401,28 +396,27 @@ std::string Streamer::build_pipeline() const {
   if (gcs_encoder_ == "custom") {
     return gcs_pipeline_;
   }
-  const int fps = static_cast<int>(std::lround(fps_));
+  const std::string src =
+      "appsrc is-live=true block=true do-timestamp=true format=time ! queue ! "
+      "videoconvert ! ";
+  const std::string gop = std::to_string(gcs_keyint_);
+
   std::string enc;
   if (gcs_encoder_ == "jetson") {
-    enc =
-        "appsrc is-live=true do-timestamp=true format=time ! queue ! "
-        "videoconvert ! video/x-raw,format=I420 ! nvvidconv ! "
-        "video/x-raw(memory:NVMM),format=NV12 ! nvv4l2h264enc bitrate=" +
-        std::to_string(gcs_bitrate_ * 1000) +
-
-        " ! h264parse";
+    enc = src +
+          "video/x-raw,format=I420 ! nvvidconv ! "
+          "video/x-raw(memory:NVMM),format=NV12 ! nvv4l2h264enc bitrate=" +
+          std::to_string(gcs_bitrate_ * 1000) + " iframeinterval=" + gop +
+          " insert-sps-pps=true ! h264parse";
   } else if (gcs_encoder_ == "nvenc") {
-    enc =
-        "appsrc is-live=true do-timestamp=true format=time ! queue ! "
-        "videoconvert ! nvh264enc bitrate=" +
-        std::to_string(gcs_bitrate_) + " zerolatency=true ! h264parse";
+    enc = src + "nvh264enc bitrate=" + std::to_string(gcs_bitrate_) +
+          " gop-size=" + gop + " zerolatency=true ! h264parse";
   } else {
-    enc =
-        "appsrc is-live=true do-timestamp=true format=time ! queue ! "
-        "videoconvert ! video/x-raw,format=I420 ! x264enc tune=zerolatency "
-        "speed-preset=ultrafast bframes=0 bitrate=" +
-        std::to_string(gcs_bitrate_) + " key-int-max=" + std::to_string(fps) +
-        " ! video/x-h264,profile=baseline ! h264parse";
+    enc = src +
+          "video/x-raw,format=I420 ! x264enc tune=zerolatency "
+          "speed-preset=ultrafast bframes=0 bitrate=" +
+          std::to_string(gcs_bitrate_) + " key-int-max=" + gop +
+          " ! video/x-h264,profile=baseline ! h264parse";
   }
   return enc +
          " config-interval=1 ! rtph264pay pt=96 config-interval=1 ! udpsink "
@@ -442,16 +436,14 @@ void Streamer::open_writer() {
   if (!writer_.open(pipe, cv::CAP_GSTREAMER, 0, fps_, out_size_, true)) {
     RCLCPP_ERROR(get_logger(),
                  "could not open GStreamer pipeline (OpenCV built without "
-                 "GStreamer, or missing plugins?). "
-                 "Retrying every 5 s.");
+                 "GStreamer, or missing plugins?). Retrying every 5 s.");
     return;
   }
   RCLCPP_INFO(
       get_logger(),
       "streaming to %s:%d. Receive with:\n  gst-launch-1.0 udpsrc port=%d "
       "caps=\"application/x-rtp,media=video,encoding-name=H264,payload=96\" "
-      "! rtph264depay ! "
-      "avdec_h264 ! videoconvert ! autovideosink sync=false",
+      "! rtph264depay ! avdec_h264 ! videoconvert ! autovideosink sync=false",
       gcs_ip_.c_str(), gcs_port_, gcs_port_);
 }
 

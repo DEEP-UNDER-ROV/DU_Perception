@@ -1,13 +1,13 @@
 streamer:
   ros__parameters:
     topics:
-      color: /camera/camera/color/image_raw
+      color: /camera/color/image_raw
       depth_viz: /depth_estimation/image_viz
       enable: /depth_estimation/enable   # "" = don't control depth_estimation
       output: /streamer/image
 
     qos:
-      reliable: false
+      reliable: true
       depth: 2
 
     stream:
@@ -15,7 +15,7 @@ streamer:
       alternate_color_sec: 5.0     # changeable at runtime
       alternate_depth_sec: 5.0     # changeable at runtime
       event_driven: true
-      fps: 15.0
+      fps: 30.0                    
       output_width: 848
       output_height: 480
       stale_timeout_sec: 1.0
@@ -28,4 +28,5 @@ streamer:
       port: 5600
       encoder: x264                # x264 | nvenc | jetson | custom
       bitrate_kbps: 2000
+      keyframe_interval: 30
       pipeline: ""                 # only used when encoder: custom

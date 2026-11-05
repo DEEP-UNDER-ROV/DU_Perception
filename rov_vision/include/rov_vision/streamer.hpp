@@ -1,5 +1,4 @@
-#ifndef ROV_VISION__STREAMER_HPP_
-#define ROV_VISION__STREAMER_HPP_
+#pragma once
 
 #include <atomic>
 #include <chrono>
@@ -46,12 +45,10 @@ class Streamer : public rclcpp::Node {
                    SetStreamMode::Response::SharedPtr res);
   void publish_depth_request(bool needed);
 
-  // input
   void on_color(const Image::ConstSharedPtr& msg);
   void on_depth(const Image::ConstSharedPtr& msg);
   cv::Mat to_output_size(const cv::Mat& src, int interpolation) const;
 
-  // output
   cv::Mat fresh(std::mutex& m, const TimedFrame& f) const;
   bool selected_depth() const;
   cv::Mat compose();
@@ -60,32 +57,28 @@ class Streamer : public rclcpp::Node {
   std::string build_pipeline() const;
   void open_writer();
 
-  // params
   std::string topic_color_, topic_depth_viz_, topic_enable_, topic_out_;
-  bool qos_reliable_{false};
+  bool qos_reliable_{true};
   int qos_depth_{2};
   bool event_driven_{true};
-  double fps_{15.0};
+  double fps_{30.0};
   cv::Size out_size_;
   double stale_sec_{1.0};
   bool overlay_mode_{true}, publish_ros_image_{false};
   bool gcs_enabled_{true};
   std::string gcs_ip_, gcs_encoder_, gcs_pipeline_;
-  int gcs_port_{5600}, gcs_bitrate_{2000};
+  int gcs_port_{5600}, gcs_bitrate_{2000}, gcs_keyint_{30};
 
   std::atomic<StreamMode> mode_{StreamMode::COLOR};
   std::atomic<double> alt_color_sec_{5.0}, alt_depth_sec_{5.0}, alt_start_{0.0};
 
-  // frames
   std::mutex color_mtx_, depth_mtx_;
   TimedFrame color_, depth_viz_;
 
-  // GStreamer output
   std::mutex writer_mtx_;
   cv::VideoWriter writer_;
   double last_open_try_{0.0};
 
-  // ROS
   rclcpp::CallbackGroup::SharedPtr cb_color_, cb_depth_, cb_out_;
   rclcpp::Subscription<Image>::SharedPtr sub_color_, sub_depth_viz_;
   rclcpp::Publisher<Image>::SharedPtr pub_out_;
@@ -96,5 +89,3 @@ class Streamer : public rclcpp::Node {
 };
 
 }  // namespace rov_vision
-
-#endif  // ROV_VISION__STREAMER_HPP_
