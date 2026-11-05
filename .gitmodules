@@ -1,9 +1,9 @@
 [submodule "rov_slam"]
 	path = rov_slam
-	url = https://github.com/ynht-edu/UW_ORB_SLAM3_ROS2.git
+	url = https://github.com/DEEP-UNDER-ROV/UW_ORB_SLAM3_ROS2.git
 [submodule "orb_slam3_dir/Pangolin"]
 	path = orb_slam3_dir/Pangolin
-	url = https://github.com/ynht-edu/Pangolin.git
+	url = https://github.com/stevenlovegrove/Pangolin.git
 [submodule "orb_slam3_dir/ORB-SLAM3"]
 	path = orb_slam3_dir/ORB-SLAM3
-	url = https://github.com/ynht-edu/UW_ORB_SLAM3.git
+	url = https://github.com/DEEP-UNDER-ROV/UW_ORB_SLAM3.git
