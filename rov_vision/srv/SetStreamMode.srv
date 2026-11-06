@@ -2,6 +2,7 @@
 uint8 COLOR=0       # colour image only
 uint8 DEPTH=1       # colour-coded depth image with legend
 uint8 ALTERNATE=2   # alternate between colour and depth
+uint8 PIP=3         # picture in picture
 
 uint8 mode
 

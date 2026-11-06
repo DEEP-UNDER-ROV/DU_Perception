@@ -23,6 +23,8 @@ const char* mode_to_string(StreamMode m) {
       return "depth";
     case StreamMode::ALTERNATE:
       return "alternate";
+    case StreamMode::PIP:
+      return "pip";
   }
   return "color";
 }
@@ -38,6 +40,10 @@ bool parse_mode(const std::string& s, StreamMode& out) {
   }
   if (s == "alternate") {
     out = StreamMode::ALTERNATE;
+    return true;
+  }
+  if (s == "pip") {
+    out = StreamMode::PIP;
     return true;
   }
   return false;
@@ -56,14 +62,17 @@ void draw_label(cv::Mat& img, const std::string& text, cv::Point org) {
               cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
 }
 
-cv::Mat placeholder(const cv::Size& size, const std::string& text) {
+cv::Mat placeholder(const cv::Size& size, const std::string& text,
+                    double font_scale = 0.9) {
   cv::Mat img = cv::Mat::zeros(size, CV_8UC3);
   int base = 0;
   const cv::Size ts =
-      cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.9, 2, &base);
-  cv::putText(img, text, cv::Point((size.width - ts.width) / 2, size.height / 2),
-              cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(255, 255, 255), 2,
-              cv::LINE_AA);
+      cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, font_scale, 2, &base);
+  cv::putText(img, text,
+              cv::Point((size.width - ts.width) / 2,
+                        (size.height + ts.height) / 2),
+              cv::FONT_HERSHEY_SIMPLEX, font_scale, cv::Scalar(255, 255, 255),
+              2, cv::LINE_AA);
   return img;
 }
 
@@ -160,6 +169,10 @@ void Streamer::declare_all_parameters() {
   overlay_mode_ = P<bool>("stream.overlay_mode_text", true);
   publish_ros_image_ = P<bool>("stream.publish_ros_image", false);
 
+  pip_scale_ = std::clamp(P<double>("stream.pip.scale", 0.35), 0.05, 1.0);
+  pip_margin_ = std::max(0, P<int>("stream.pip.margin_px", 12));
+  pip_border_ = std::max(0, P<int>("stream.pip.border_px", 2));
+
   gcs_enabled_ = P<bool>("gcs.enabled", true);
   gcs_ip_ = P<std::string>("gcs.ip", "127.0.0.1");
   gcs_port_ = P<int>("gcs.port", 5600);
@@ -183,7 +196,8 @@ rcl_interfaces::msg::SetParametersResult Streamer::on_params(
       if (p.get_type() != rclcpp::ParameterType::PARAMETER_STRING ||
           !parse_mode(p.as_string(), m)) {
         res.successful = false;
-        res.reason = "stream.mode must be one of: color, depth, alternate";
+        res.reason =
+            "stream.mode must be one of: color, depth, alternate, pip";
         return res;
       }
     } else if (n == "stream.alternate_color_sec" ||
@@ -192,6 +206,20 @@ rcl_interfaces::msg::SetParametersResult Streamer::on_params(
           p.as_double() <= 0.0) {
         res.successful = false;
         res.reason = n + " must be a double > 0";
+        return res;
+      }
+    } else if (n == "stream.pip.scale") {
+      if (p.get_type() != rclcpp::ParameterType::PARAMETER_DOUBLE ||
+          p.as_double() < 0.05 || p.as_double() > 1.0) {
+        res.successful = false;
+        res.reason = "stream.pip.scale must be a double in [0.05, 1.0]";
+        return res;
+      }
+    } else if (n == "stream.pip.margin_px") {
+      if (p.get_type() != rclcpp::ParameterType::PARAMETER_INTEGER ||
+          p.as_int() < 0) {
+        res.successful = false;
+        res.reason = "stream.pip.margin_px must be an integer >= 0";
         return res;
       }
     } else if (n != "use_sim_time") {
@@ -203,11 +231,15 @@ rcl_interfaces::msg::SetParametersResult Streamer::on_params(
 
   // durations before mode, so switching to alternate uses the new timings
   for (const auto& p : ps) {
-    if (p.get_name() == "stream.alternate_color_sec") {
+    const auto& n = p.get_name();
+    if (n == "stream.alternate_color_sec") {
       alt_color_sec_ = p.as_double();
-    }
-    if (p.get_name() == "stream.alternate_depth_sec") {
+    } else if (n == "stream.alternate_depth_sec") {
       alt_depth_sec_ = p.as_double();
+    } else if (n == "stream.pip.scale") {
+      pip_scale_ = p.as_double();
+    } else if (n == "stream.pip.margin_px") {
+      pip_margin_ = static_cast<int>(p.as_int());
     }
   }
   for (const auto& p : ps) {
@@ -236,10 +268,13 @@ void Streamer::on_set_mode(const SetStreamMode::Request::SharedPtr req,
     case SetStreamMode::Request::ALTERNATE:
       m = StreamMode::ALTERNATE;
       break;
+    case SetStreamMode::Request::PIP:
+      m = StreamMode::PIP;
+      break;
     default:
       res->success = false;
       res->message = "invalid mode " + std::to_string(req->mode) +
-                     " (0=color 1=depth 2=alternate)";
+                     " (0=color 1=depth 2=alternate 3=pip)";
       return;
   }
   std::vector<rclcpp::Parameter> ps;
@@ -328,6 +363,7 @@ cv::Mat Streamer::fresh(std::mutex& m, const TimedFrame& f) const {
   return f.img.clone();
 }
 
+// pip is driven by colour; depth only rides along as the inset
 bool Streamer::selected_depth() const {
   const StreamMode m = mode_.load();
   if (m == StreamMode::ALTERNATE) {
@@ -338,7 +374,43 @@ bool Streamer::selected_depth() const {
   return m == StreamMode::DEPTH;
 }
 
+cv::Rect Streamer::draw_inset(cv::Mat& base, const cv::Mat& inset) const {
+  const double s = std::clamp(pip_scale_.load(), 0.05, 1.0);
+  const int w = std::max(16, static_cast<int>(std::lround(base.cols * s)));
+  const int h = std::max(16, static_cast<int>(std::lround(base.rows * s)));
+  const int x = (base.cols - w) / 2;
+  const int y = std::max(0, base.rows - h - std::max(0, pip_margin_.load()));
+  const cv::Rect roi(x, y, w, h);
+
+  cv::Mat small;
+  if (inset.empty()) {
+    small = placeholder(roi.size(), "NO DEPTH SIGNAL", 0.5);
+  } else {
+    cv::resize(inset, small, roi.size(), 0, 0, cv::INTER_AREA);
+  }
+  small.copyTo(base(roi));
+
+  if (pip_border_ > 0) {
+    cv::rectangle(base, roi, cv::Scalar(255, 255, 255), pip_border_,
+                  cv::LINE_AA);
+  }
+  return roi;
+}
+
 cv::Mat Streamer::compose() {
+  if (mode_.load() == StreamMode::PIP) {
+    cv::Mat frame = fresh(color_mtx_, color_);
+    if (frame.empty()) {
+      frame = placeholder(out_size_, "NO COLOR SIGNAL");
+    }
+    const cv::Rect roi = draw_inset(frame, fresh(depth_mtx_, depth_viz_));
+    if (overlay_mode_) {
+      draw_label(frame, "COLOR", cv::Point(10, 26));
+      draw_label(frame, "DEPTH", cv::Point(roi.x + 6, roi.y + 20));
+    }
+    return frame;
+  }
+
   const bool show_depth = selected_depth();
 
   cv::Mat frame;

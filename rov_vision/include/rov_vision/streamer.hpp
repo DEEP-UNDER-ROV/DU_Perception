@@ -17,7 +17,7 @@
 
 namespace rov_vision {
 
-enum class StreamMode { COLOR = 0, DEPTH = 1, ALTERNATE = 2 };
+enum class StreamMode { COLOR = 0, DEPTH = 1, ALTERNATE = 2, PIP = 3 };
 
 class Streamer : public rclcpp::Node {
  public:
@@ -51,6 +51,7 @@ class Streamer : public rclcpp::Node {
 
   cv::Mat fresh(std::mutex& m, const TimedFrame& f) const;
   bool selected_depth() const;
+  cv::Rect draw_inset(cv::Mat& base, const cv::Mat& inset) const;
   cv::Mat compose();
   void on_timer();
   void emit_frame();
@@ -71,6 +72,10 @@ class Streamer : public rclcpp::Node {
 
   std::atomic<StreamMode> mode_{StreamMode::COLOR};
   std::atomic<double> alt_color_sec_{5.0}, alt_depth_sec_{5.0}, alt_start_{0.0};
+
+  std::atomic<double> pip_scale_{0.35};
+  std::atomic<int> pip_margin_{12};
+  int pip_border_{2};
 
   std::mutex color_mtx_, depth_mtx_;
   TimedFrame color_, depth_viz_;

@@ -21,6 +21,10 @@ streamer:
       stale_timeout_sec: 1.0
       overlay_mode_text: true
       publish_ros_image: false
+      pip:
+        scale: 0.35 
+        margin_px: 12
+        border_px: 2
 
     gcs:
       enabled: true
