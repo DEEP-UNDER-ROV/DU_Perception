@@ -1,0 +1,22 @@
+<launch>
+  <arg name="param_dir" default="$(find-pkg-share rov_vision)/config"/>
+  <arg name="realsense_file" default="$(var param_dir)/record_imu.yaml"/>
+
+  <arg name="camera_name" default="camera"/>
+  <arg name="camera_namespace" default=""/>
+
+  <arg name="record" default="true"/>
+  <arg name="bag_dir" default="$(env HOME)/data/imu_allan"/>
+  <arg name="storage" default="mcap"/>
+  <arg name="imu_topic" default="/camera/imu"/>
+  <arg name="gyro_topic" default="/camera/gyro/sample"/>
+  <arg name="accel_topic" default="/camera/accel/sample"/>
+
+  <node pkg="realsense2_camera" exec="realsense2_camera_node"
+        name="$(var camera_name)" namespace="$(var camera_namespace)" output="screen">
+    <param from="$(var realsense_file)"/>
+  </node>
+
+  <executable if="$(var record)" output="screen" cwd="$(var bag_dir)"
+              cmd="ros2 bag record --storage $(var storage) --topics $(var imu_topic) $(var gyro_topic) $(var accel_topic)"/>
+</launch>
