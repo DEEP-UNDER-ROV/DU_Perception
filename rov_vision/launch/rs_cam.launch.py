@@ -49,6 +49,8 @@ def generate_launch_description():
                     "camera_namespace": "",
                     "enable_gyro": "true",
                     "enable_accel": "true",
+                    "gyro_fps": "200",
+                    "accel_fps": "200",
                     "unite_imu_method": LaunchConfiguration("unite_imu_method"),
                     "enable_color": "true",
                     "enable_depth": "false",
